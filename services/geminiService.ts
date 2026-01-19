@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, GenerateContentResponse, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { ProcessedFile } from "../types";
 
@@ -68,9 +67,15 @@ export const generateDocumentStream = async (
   }));
 
   // 2. Prepare Request
-  onProgress("Initializing Gemini 3.0 session...");
+  // Check if model supports Thinking Config (Gemini 3.0 and 2.5 series)
+  const isThinkingModel = modelName.includes('gemini-3') || modelName.includes('gemini-2.5');
+  const initMsg = isThinkingModel 
+    ? "Initializing Gemini 3.0 session (Deep Thinking)..." 
+    : "Initializing Gemini session...";
+
+  onProgress(initMsg);
   
-  // Universal User Prompt
+  // Universal User Prompt with Reinforcement
   const prompt = `添付したファイルセット（PDFまたは画像、計${files.length}点）を解析し、Markdownドキュメントを作成してください。
 
 【重要指示：自動判別】
@@ -79,7 +84,31 @@ export const generateDocumentStream = async (
 2. **バラバラの資料の場合**: それぞれを独立した項目（Item 1, Item 2...）としてリスト化してください。
 
 PDFが含まれる場合は、その全ページを解析対象としてください。
-入力された画像/PDFの順序に従って処理を開始してください。`;
+入力された画像/PDFの順序に従って処理を開始してください。
+
+【Strict Final Constraints】
+1. **Original Language Preserved**: Output strictly in the original language of the document (e.g., Japanese, English). DO NOT TRANSLATE.
+2. **Structure**: Follow Markdown format rigorously (headers, tables, lists).`;
+
+  // Prepare Config
+  const config: any = {
+    systemInstruction: systemInstruction,
+    temperature: temperature,
+    safetySettings: [
+      { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+      { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+    ]
+  };
+
+  if (isThinkingModel) {
+    // 2048 tokens for reasoning allows the model to plan layout and structure before outputting.
+    config.thinkingConfig = { thinkingBudget: 2048 };
+    // maxOutputTokens limits the sum of thinking + response.
+    // Increased to 65536 to prevent output truncation on long documents.
+    config.maxOutputTokens = 65536; 
+  }
 
   try {
     const responseStream = await ai.models.generateContentStream({
@@ -90,16 +119,7 @@ PDFが含まれる場合は、その全ページを解析対象としてくだ�
           { text: prompt }
         ]
       },
-      config: {
-        systemInstruction: systemInstruction,
-        temperature: temperature,
-        safetySettings: [
-          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-        ]
-      }
+      config: config
     });
 
     onProgress("Receiving logic stream...");
