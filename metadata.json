@@ -1,0 +1,5 @@
+{
+  "name": "OCR",
+  "description": "A unified visual-first pipeline for converting PDFs and complex image-based documents into structured Markdown using Gemini 3.0 Vision.",
+  "requestFramePermissions": []
+}
